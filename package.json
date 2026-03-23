@@ -1,0 +1,25 @@
+{
+  "name": "event-booking-api",
+  "version": "1.0.0",
+  "description": "REST API for managing events, bookings, and attendance tracking — built with Node.js, Express, and MySQL",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev":   "nodemon server.js"
+  },
+  "keywords": ["node", "express", "mysql", "rest-api", "booking"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv":             "^16.4.5",
+    "express":            "^5.2.1",
+    "mysql2":             "^3.20.0",
+    "swagger-ui-express": "^5.0.1",
+    "uuid":               "^11.0.0",
+    "yamljs":             "^0.3.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}

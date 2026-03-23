@@ -1,0 +1,264 @@
+{
+  "info": {
+    "name": "Event Booking API",
+    "_postman_id": "event-booking-api-collection-v1",
+    "description": "Complete Postman collection for the Event Booking System API.\n\nIncludes all 5 endpoints with pre-filled request bodies and descriptions.\n\n**Base URL:** http://localhost:3000\n\n**Setup:**\n1. Import schema.sql into MySQL\n2. Seed at least one user: INSERT INTO users (name, email) VALUES ('Test User', 'test@example.com')\n3. Run the server: npm start\n4. Use requests in order: Create Event → Book Ticket → View Bookings → Check In",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string",
+      "description": "Change this if your server runs on a different port or host"
+    }
+  ],
+  "item": [
+    {
+      "name": "Events",
+      "description": "Create and browse events",
+      "item": [
+        {
+          "name": "GET /events — List Upcoming Events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"]
+            },
+            "description": "Returns all events where date >= NOW(), sorted chronologically.\n\n**Expected response:** 200 OK with an array of event objects.\n\nIf no upcoming events exist, `data` will be an empty array and `count` will be 0."
+          },
+          "response": [
+            {
+              "name": "200 — Events found",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": true,\n  \"count\": 2,\n  \"data\": [\n    {\n      \"id\": 1,\n      \"title\": \"Node.js Workshop 2025\",\n      \"description\": \"Hands-on Express + MySQL session\",\n      \"date\": \"2025-11-15T18:00:00.000Z\",\n      \"total_capacity\": 50,\n      \"remaining_tickets\": 48\n    },\n    {\n      \"id\": 2,\n      \"title\": \"React Summit Delhi\",\n      \"description\": null,\n      \"date\": \"2025-12-05T10:00:00.000Z\",\n      \"total_capacity\": 200,\n      \"remaining_tickets\": 200\n    }\n  ]\n}"
+            },
+            {
+              "name": "200 — No upcoming events",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": true,\n  \"count\": 0,\n  \"data\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST /events — Create Event",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Node.js Workshop 2025\",\n  \"description\": \"A hands-on workshop covering Express, MySQL, and REST API design.\",\n  \"date\": \"2025-11-15T18:00:00\",\n  \"total_capacity\": 50\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"]
+            },
+            "description": "Creates a new event. `remaining_tickets` is automatically set to `total_capacity`.\n\n**Required fields:** `title`, `date`, `total_capacity`\n**Optional fields:** `description`\n\n**Validation rules:**\n- `title` must be a non-empty string\n- `date` must be a valid ISO 8601 date-time AND in the future\n- `total_capacity` must be a positive integer\n\n**Try these error cases:**\n- Remove `title` → 400 with validation errors array\n- Set `date` to a past date → 400 \"date must be in the future\"\n- Set `total_capacity` to -1 → 400 validation error"
+          },
+          "response": [
+            {
+              "name": "201 — Event created",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Event created successfully\",\n  \"data\": {\n    \"id\": 1,\n    \"title\": \"Node.js Workshop 2025\",\n    \"description\": \"A hands-on workshop covering Express, MySQL, and REST API design.\",\n    \"date\": \"2025-11-15T18:00:00.000Z\",\n    \"total_capacity\": 50,\n    \"remaining_tickets\": 50\n  }\n}"
+            },
+            {
+              "name": "400 — Validation failed (multiple errors)",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 400,\n  \"error\": \"title is required and must be a non-empty string | total_capacity is required\",\n  \"errors\": [\n    \"title is required and must be a non-empty string\",\n    \"total_capacity is required\"\n  ]\n}"
+            },
+            {
+              "name": "400 — Past date",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 400,\n  \"error\": \"date must be in the future\",\n  \"errors\": [\"date must be in the future\"]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "description": "Book tickets for events",
+      "item": [
+        {
+          "name": "POST /bookings — Book a Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": 1,\n  \"event_id\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings"]
+            },
+            "description": "Books a ticket for a user. This is the most complex endpoint — it runs inside a MySQL transaction with a row-level lock (`SELECT ... FOR UPDATE`) to prevent overselling under concurrent load.\n\n**What happens internally:**\n1. Lock the event row\n2. Check remaining_tickets > 0\n3. Verify user exists\n4. Check user hasn't already booked\n5. Decrement remaining_tickets\n6. Insert booking with UUID unique_code\n7. Commit transaction\n\n**The `unique_code` in the response is your ticket** — use it to generate a QR code or call the attendance endpoint.\n\n**Try these error cases:**\n- Use a non-existent event_id → 404\n- Use a non-existent user_id → 404\n- Call twice with same user + event → 409 duplicate booking\n- Book all remaining tickets then try again → 409 sold out"
+          },
+          "response": [
+            {
+              "name": "201 — Booking confirmed",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Booking confirmed\",\n  \"data\": {\n    \"booking_id\": 42,\n    \"user_id\": 1,\n    \"event_id\": 1,\n    \"event_title\": \"Node.js Workshop 2025\",\n    \"unique_code\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"booking_date\": \"2025-10-01T09:30:00.000Z\"\n  }\n}"
+            },
+            {
+              "name": "404 — Event not found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 404,\n  \"error\": \"Event not found\"\n}"
+            },
+            {
+              "name": "404 — User not found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 404,\n  \"error\": \"User not found\"\n}"
+            },
+            {
+              "name": "409 — Sold out",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 409,\n  \"error\": \"No tickets remaining for this event\"\n}"
+            },
+            {
+              "name": "409 — Duplicate booking",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 409,\n  \"error\": \"User has already booked this event\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "description": "View user booking history",
+      "item": [
+        {
+          "name": "GET /users/:id/bookings — Get User Bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/1/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", "1", "bookings"]
+            },
+            "description": "Returns all bookings made by a specific user, joined with full event details.\n\nResults are sorted by `booking_date` descending — most recent booking first.\n\n**Try these error cases:**\n- Use a non-existent user ID → 404\n- Use a string like `/users/abc/bookings` → 400 validation error\n- Use a user with no bookings → 200 with empty `data` array"
+          },
+          "response": [
+            {
+              "name": "200 — Bookings found",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": true,\n  \"user\": {\n    \"id\": 1,\n    \"name\": \"Priya Sharma\",\n    \"email\": \"priya@example.com\"\n  },\n  \"count\": 2,\n  \"data\": [\n    {\n      \"booking_id\": 42,\n      \"booking_date\": \"2025-10-01T09:30:00.000Z\",\n      \"unique_code\": \"550e8400-e29b-41d4-a716-446655440000\",\n      \"event_id\": 1,\n      \"event_title\": \"Node.js Workshop 2025\",\n      \"event_description\": \"Hands-on Express + MySQL session\",\n      \"event_date\": \"2025-11-15T18:00:00.000Z\",\n      \"total_capacity\": 50,\n      \"remaining_tickets\": 48\n    },\n    {\n      \"booking_id\": 38,\n      \"booking_date\": \"2025-09-20T14:00:00.000Z\",\n      \"unique_code\": \"7c9e6679-7425-40de-944b-e07fc1f90ae7\",\n      \"event_id\": 2,\n      \"event_title\": \"React Summit Delhi\",\n      \"event_description\": null,\n      \"event_date\": \"2025-12-05T10:00:00.000Z\",\n      \"total_capacity\": 200,\n      \"remaining_tickets\": 200\n    }\n  ]\n}"
+            },
+            {
+              "name": "404 — User not found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 404,\n  \"error\": \"User not found\"\n}"
+            },
+            {
+              "name": "400 — Invalid ID",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 400,\n  \"error\": \"User id must be a positive integer\",\n  \"errors\": [\"User id must be a positive integer\"]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Attendance",
+      "description": "Check-in attendees at the event door",
+      "item": [
+        {
+          "name": "POST /events/:id/attendance — Record Check-In",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"booking_code\": \"550e8400-e29b-41d4-a716-446655440000\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/1/attendance",
+              "host": ["{{baseUrl}}"],
+              "path": ["events", "1", "attendance"]
+            },
+            "description": "Scans a booking code and records the attendee's entry.\n\nReplace `booking_code` with the `unique_code` returned from `POST /bookings`.\n\n**Business rules:**\n- booking_code must belong to the event in the URL path\n- Each code can only be scanned once (duplicate protection at app + DB level)\n- Returns total tickets sold for the event — useful for real-time dashboards\n\n**Try these error cases:**\n- Call twice with same code → 409 already scanned\n- Use a code from a different event → 404 invalid code\n- Use a non-existent event ID → 404 event not found\n- Send empty booking_code → 400 validation error"
+          },
+          "response": [
+            {
+              "name": "200 — Attendance recorded",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Attendance recorded successfully\",\n  \"data\": {\n    \"event_id\": 1,\n    \"event_title\": \"Node.js Workshop 2025\",\n    \"booking_code\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"total_bookings\": 13\n  }\n}"
+            },
+            {
+              "name": "404 — Event not found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 404,\n  \"error\": \"Event not found\"\n}"
+            },
+            {
+              "name": "404 — Invalid booking code",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 404,\n  \"error\": \"Invalid booking code for this event\"\n}"
+            },
+            {
+              "name": "409 — Already scanned",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 409,\n  \"error\": \"This ticket has already been scanned\"\n}"
+            },
+            {
+              "name": "400 — Missing booking code",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"success\": false,\n  \"status\": 400,\n  \"error\": \"booking_code is required and must be a non-empty string\",\n  \"errors\": [\"booking_code is required and must be a non-empty string\"]\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

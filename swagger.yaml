@@ -1,0 +1,737 @@
+openapi: 3.0.3
+
+info:
+  title: Event Booking System API
+  description: |
+    A REST API for managing events, bookings, and attendance tracking.
+
+    ## Features
+    - Browse and create upcoming events
+    - Book tickets with race-condition-safe transactions
+    - Track event attendance via unique booking codes
+    - View all bookings per user
+
+    ## Error Format
+    All errors return a consistent JSON shape:
+    ```json
+    {
+      "success": false,
+      "status": 404,
+      "error": "Event not found"
+    }
+    ```
+    Validation errors also include an `errors` array with every broken rule.
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@eventbooking.com
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+tags:
+  - name: Events
+    description: Create and browse events
+  - name: Bookings
+    description: Book tickets for events
+  - name: Users
+    description: View user booking history
+  - name: Attendance
+    description: Record and verify event check-ins
+
+# ──────────────────────────────────────────────────────────────
+# REUSABLE COMPONENTS
+# ──────────────────────────────────────────────────────────────
+components:
+
+  # ── Schemas ──────────────────────────────────────────────────
+  schemas:
+
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: "Node.js Workshop 2025"
+        description:
+          type: string
+          nullable: true
+          example: "A hands-on workshop covering Express, MySQL, and REST API design."
+        date:
+          type: string
+          format: date-time
+          example: "2025-11-15T18:00:00.000Z"
+        total_capacity:
+          type: integer
+          example: 100
+        remaining_tickets:
+          type: integer
+          example: 87
+
+    Booking:
+      type: object
+      properties:
+        booking_id:
+          type: integer
+          example: 42
+        user_id:
+          type: integer
+          example: 7
+        event_id:
+          type: integer
+          example: 1
+        event_title:
+          type: string
+          example: "Node.js Workshop 2025"
+        unique_code:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        booking_date:
+          type: string
+          format: date-time
+          example: "2025-10-01T09:30:00.000Z"
+
+    UserBooking:
+      type: object
+      description: A booking record with full event details (returned in user bookings list)
+      properties:
+        booking_id:
+          type: integer
+          example: 42
+        booking_date:
+          type: string
+          format: date-time
+          example: "2025-10-01T09:30:00.000Z"
+        unique_code:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        event_id:
+          type: integer
+          example: 1
+        event_title:
+          type: string
+          example: "Node.js Workshop 2025"
+        event_description:
+          type: string
+          nullable: true
+          example: "A hands-on workshop covering Express, MySQL, and REST API design."
+        event_date:
+          type: string
+          format: date-time
+          example: "2025-11-15T18:00:00.000Z"
+        total_capacity:
+          type: integer
+          example: 100
+        remaining_tickets:
+          type: integer
+          example: 87
+
+    AttendanceResult:
+      type: object
+      properties:
+        event_id:
+          type: integer
+          example: 1
+        event_title:
+          type: string
+          example: "Node.js Workshop 2025"
+        booking_code:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        total_bookings:
+          type: integer
+          description: Total number of tickets sold for this event
+          example: 13
+
+    # ── Request bodies ────────────────────────────────────────
+    CreateEventBody:
+      type: object
+      required:
+        - title
+        - date
+        - total_capacity
+      properties:
+        title:
+          type: string
+          minLength: 1
+          example: "Node.js Workshop 2025"
+        description:
+          type: string
+          nullable: true
+          example: "A hands-on workshop covering Express, MySQL, and REST API design."
+        date:
+          type: string
+          format: date-time
+          description: Must be a future date-time in ISO 8601 format
+          example: "2025-11-15T18:00:00"
+        total_capacity:
+          type: integer
+          minimum: 1
+          example: 100
+
+    CreateBookingBody:
+      type: object
+      required:
+        - user_id
+        - event_id
+      properties:
+        user_id:
+          type: integer
+          minimum: 1
+          example: 7
+        event_id:
+          type: integer
+          minimum: 1
+          example: 1
+
+    AttendanceBody:
+      type: object
+      required:
+        - booking_code
+      properties:
+        booking_code:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+    # ── Error responses ───────────────────────────────────────
+    Error400:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: "title is required and must be a non-empty string | date must be in the future"
+        errors:
+          type: array
+          description: Present only for validation errors — lists every broken rule
+          items:
+            type: string
+          example:
+            - "title is required and must be a non-empty string"
+            - "date must be in the future"
+
+    Error404:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        status:
+          type: integer
+          example: 404
+        error:
+          type: string
+          example: "Event not found"
+
+    Error409:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        status:
+          type: integer
+          example: 409
+        error:
+          type: string
+          example: "No tickets remaining for this event"
+
+    Error500:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        status:
+          type: integer
+          example: 500
+        error:
+          type: string
+          example: "Internal server error"
+
+  # ── Reusable responses ────────────────────────────────────────
+  responses:
+    BadRequest:
+      description: Validation failed — one or more required fields are missing or invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error400"
+
+    NotFound:
+      description: The requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error404"
+
+    Conflict:
+      description: Business rule conflict (duplicate booking, sold out, already checked in)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error409"
+
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error500"
+
+# ──────────────────────────────────────────────────────────────
+# PATHS
+# ──────────────────────────────────────────────────────────────
+paths:
+
+  # ── GET /events ───────────────────────────────────────────────
+  /events:
+    get:
+      tags:
+        - Events
+      summary: List all upcoming events
+      description: |
+        Returns every event whose date is **today or in the future**, sorted
+        chronologically by event date (ascending).
+      operationId: getEvents
+      responses:
+        "200":
+          description: List of upcoming events retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  count:
+                    type: integer
+                    description: Number of events returned
+                    example: 2
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+              example:
+                success: true
+                count: 2
+                data:
+                  - id: 1
+                    title: "Node.js Workshop 2025"
+                    description: "A hands-on workshop covering Express, MySQL, and REST API design."
+                    date: "2025-11-15T18:00:00.000Z"
+                    total_capacity: 100
+                    remaining_tickets: 87
+                  - id: 2
+                    title: "React Summit Delhi"
+                    description: null
+                    date: "2025-12-05T10:00:00.000Z"
+                    total_capacity: 200
+                    remaining_tickets: 200
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    # ── POST /events ─────────────────────────────────────────────
+    post:
+      tags:
+        - Events
+      summary: Create a new event
+      description: |
+        Creates a new event. `remaining_tickets` is automatically set equal
+        to `total_capacity` on creation.
+
+        **Validation rules:**
+        - `title` — required, non-empty string
+        - `date` — required, valid ISO 8601 date-time, **must be in the future**
+        - `total_capacity` — required, positive integer
+        - `description` — optional string
+      operationId: createEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEventBody"
+            examples:
+              full:
+                summary: All fields provided
+                value:
+                  title: "Node.js Workshop 2025"
+                  description: "A hands-on workshop covering Express, MySQL, and REST API design."
+                  date: "2025-11-15T18:00:00"
+                  total_capacity: 100
+              minimal:
+                summary: Required fields only
+                value:
+                  title: "React Summit Delhi"
+                  date: "2025-12-05T10:00:00"
+                  total_capacity: 200
+      responses:
+        "201":
+          description: Event created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Event created successfully"
+                  data:
+                    $ref: "#/components/schemas/Event"
+              example:
+                success: true
+                message: "Event created successfully"
+                data:
+                  id: 3
+                  title: "Node.js Workshop 2025"
+                  description: "A hands-on workshop covering Express, MySQL, and REST API design."
+                  date: "2025-11-15T18:00:00.000Z"
+                  total_capacity: 100
+                  remaining_tickets: 100
+        "400":
+          description: |
+            Validation failed. The `errors` array lists **every** broken rule so the
+            client can fix all problems in one round-trip.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error400"
+              examples:
+                missingFields:
+                  summary: Multiple missing fields
+                  value:
+                    success: false
+                    status: 400
+                    error: "title is required and must be a non-empty string | total_capacity is required"
+                    errors:
+                      - "title is required and must be a non-empty string"
+                      - "total_capacity is required"
+                pastDate:
+                  summary: Date is in the past
+                  value:
+                    success: false
+                    status: 400
+                    error: "date must be in the future"
+                    errors:
+                      - "date must be in the future"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── POST /bookings ────────────────────────────────────────────
+  /bookings:
+    post:
+      tags:
+        - Bookings
+      summary: Book a ticket for an event
+      description: |
+        Creates a booking for a user-event pair. This endpoint is the most
+        sensitive in the system and runs inside a **MySQL transaction with a
+        row-level lock** (`SELECT ... FOR UPDATE`) to prevent overselling
+        under concurrent load.
+
+        **Business rules enforced:**
+        1. Event must exist
+        2. At least 1 ticket must remain (`remaining_tickets > 0`)
+        3. User must exist
+        4. User cannot book the same event twice
+        5. `remaining_tickets` is decremented atomically
+        6. A UUID `unique_code` is generated — use this for QR code generation
+      operationId: createBooking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBookingBody"
+            example:
+              user_id: 7
+              event_id: 1
+      responses:
+        "201":
+          description: Booking confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Booking confirmed"
+                  data:
+                    $ref: "#/components/schemas/Booking"
+              example:
+                success: true
+                message: "Booking confirmed"
+                data:
+                  booking_id: 42
+                  user_id: 7
+                  event_id: 1
+                  event_title: "Node.js Workshop 2025"
+                  unique_code: "550e8400-e29b-41d4-a716-446655440000"
+                  booking_date: "2025-10-01T09:30:00.000Z"
+        "400":
+          description: Invalid request body (missing or non-integer IDs)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error400"
+              example:
+                success: false
+                status: 400
+                error: "user_id must be a positive integer"
+                errors:
+                  - "user_id must be a positive integer"
+        "404":
+          description: User or event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error404"
+              examples:
+                eventNotFound:
+                  summary: Event does not exist
+                  value:
+                    success: false
+                    status: 404
+                    error: "Event not found"
+                userNotFound:
+                  summary: User does not exist
+                  value:
+                    success: false
+                    status: 404
+                    error: "User not found"
+        "409":
+          description: Conflict — sold out or duplicate booking
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error409"
+              examples:
+                soldOut:
+                  summary: No tickets remaining
+                  value:
+                    success: false
+                    status: 409
+                    error: "No tickets remaining for this event"
+                duplicate:
+                  summary: User already booked this event
+                  value:
+                    success: false
+                    status: 409
+                    error: "User has already booked this event"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── GET /users/:id/bookings ───────────────────────────────────
+  /users/{id}/bookings:
+    get:
+      tags:
+        - Users
+      summary: Get all bookings for a user
+      description: |
+        Returns all bookings made by a specific user, joined with full event
+        details. Results are sorted by `booking_date` descending (most recent first).
+      operationId: getUserBookings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The user's unique ID (positive integer)
+          schema:
+            type: integer
+            minimum: 1
+            example: 7
+      responses:
+        "200":
+          description: User bookings retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 7
+                      name:
+                        type: string
+                        example: "Priya Sharma"
+                      email:
+                        type: string
+                        example: "priya@example.com"
+                  count:
+                    type: integer
+                    example: 2
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UserBooking"
+              example:
+                success: true
+                user:
+                  id: 7
+                  name: "Priya Sharma"
+                  email: "priya@example.com"
+                count: 2
+                data:
+                  - booking_id: 42
+                    booking_date: "2025-10-01T09:30:00.000Z"
+                    unique_code: "550e8400-e29b-41d4-a716-446655440000"
+                    event_id: 1
+                    event_title: "Node.js Workshop 2025"
+                    event_description: "A hands-on workshop covering Express, MySQL, and REST API design."
+                    event_date: "2025-11-15T18:00:00.000Z"
+                    total_capacity: 100
+                    remaining_tickets: 87
+                  - booking_id: 38
+                    booking_date: "2025-09-20T14:00:00.000Z"
+                    unique_code: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                    event_id: 2
+                    event_title: "React Summit Delhi"
+                    event_description: null
+                    event_date: "2025-12-05T10:00:00.000Z"
+                    total_capacity: 200
+                    remaining_tickets: 200
+        "400":
+          description: Invalid user ID in path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error400"
+              example:
+                success: false
+                status: 400
+                error: "User id must be a positive integer"
+                errors:
+                  - "User id must be a positive integer"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── POST /events/:id/attendance ───────────────────────────────
+  /events/{id}/attendance:
+    post:
+      tags:
+        - Attendance
+      summary: Record attendance via booking code
+      description: |
+        Scans a booking code and records the attendee's entry. This is the
+        **check-in endpoint** — call it when scanning a ticket QR code at the door.
+
+        **Business rules enforced:**
+        1. Event must exist
+        2. `booking_code` must belong to this specific event
+        3. A booking code can only be scanned **once** (duplicate check at both app and DB level)
+        4. Returns the total number of tickets sold for the event (useful for real-time dashboards)
+      operationId: recordAttendance
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The event's unique ID (positive integer)
+          schema:
+            type: integer
+            minimum: 1
+            example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttendanceBody"
+            example:
+              booking_code: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        "200":
+          description: Attendance recorded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Attendance recorded successfully"
+                  data:
+                    $ref: "#/components/schemas/AttendanceResult"
+              example:
+                success: true
+                message: "Attendance recorded successfully"
+                data:
+                  event_id: 1
+                  event_title: "Node.js Workshop 2025"
+                  booking_code: "550e8400-e29b-41d4-a716-446655440000"
+                  total_bookings: 13
+        "400":
+          description: Missing or empty booking_code, or invalid event ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error400"
+              example:
+                success: false
+                status: 400
+                error: "booking_code is required and must be a non-empty string"
+                errors:
+                  - "booking_code is required and must be a non-empty string"
+        "404":
+          description: Event not found, or booking code does not belong to this event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error404"
+              examples:
+                eventNotFound:
+                  summary: Event does not exist
+                  value:
+                    success: false
+                    status: 404
+                    error: "Event not found"
+                invalidCode:
+                  summary: Booking code not valid for this event
+                  value:
+                    success: false
+                    status: 404
+                    error: "Invalid booking code for this event"
+        "409":
+          description: Ticket already scanned — duplicate check-in attempt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error409"
+              example:
+                success: false
+                status: 409
+                error: "This ticket has already been scanned"
+        "500":
+          $ref: "#/components/responses/InternalError"
