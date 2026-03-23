@@ -71,7 +71,8 @@
 ```
 event-booking-api/
 │
-├── 📄 server.js                               # 🚀 Entry point — mounts Express, Swagger, routes
+├── 📄 server.js                               # 🚀 Entry point — ONLY starts HTTP server (app.listen)
+├── 📄 app.js                                  # ⚙️  Express setup — Swagger, middleware, routes, error handler
 ├── 📄 swagger.yaml                            # 📖 OpenAPI 3.0 full specification
 ├── 📄 package.json                            # 📦 Dependencies and npm scripts
 ├── 📄 .env                                    # 🔐 Local secrets (git-ignored)
@@ -92,6 +93,7 @@ event-booking-api/
 │   └── 📄 errorHandler.js                     # asyncHandler wrapper + global error handler
 │
 ├── 📁 routes/                                 # 🗺️ Pure HTTP wiring — no logic
+│   ├── 📄 index.js                            # 🔀 Central registry — imports & mounts all routers
 │   ├── 📄 events.js                           # GET/POST /events, POST /events/:id/attendance
 │   ├── 📄 bookings.js                         # POST /bookings
 │   └── 📄 users.js                            # GET /users/:id/bookings
@@ -117,12 +119,35 @@ event-booking-api/
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      server.js                                   │
-│              Express Application Entry Point                     │
+│         Entry Point — ONLY binds the port                        │
+│                                                                  │
+│         const app = require("./app");                            │
+│         app.listen(PORT, () => { ... });                         │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │  delegates to
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        app.js                                    │
+│         Express App Setup — Swagger, Middleware, Routes          │
 │                                                                  │
 │   ┌─────────────────┐    ┌──────────────────────────────────┐   │
 │   │   Swagger UI     │    │      express.json()              │   │
 │   │  /api-docs       │    │   Body Parser Middleware         │   │
 │   └─────────────────┘    └──────────────────────────────────┘   │
+│                                                                  │
+│         app.use(require("./routes/index"))                       │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  routes/index.js  🔀                             │
+│            Central Route Registry                                │
+│                                                                  │
+│   router.use("/events",   eventsRouter)                          │
+│   router.use("/bookings", bookingsRouter)                        │
+│   router.use("/users",    usersRouter)                           │
+│                                                                  │
+│   ← Add new resources here. app.js never needs to change. →     │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
                            ▼
@@ -191,15 +216,21 @@ event-booking-api/
 ### MVC Pattern Summary
 
 ```
-REQUEST  →  Route (wiring only)
+REQUEST  →  server.js            ← only binds the TCP port
                   ↓
-            asyncHandler()          ← catches all async errors
+            app.js               ← Express setup, Swagger, middleware mount
                   ↓
-            validate.js             ← two-phase input validation
+            routes/index.js      ← central route registry
                   ↓
-            Controller              ← business logic + DB queries
+            Route file           ← wiring only (events/bookings/users)
                   ↓
-            config/db.js            ← mysql2 pool
+            asyncHandler()       ← catches all async errors
+                  ↓
+            validate.js          ← two-phase input validation
+                  ↓
+            Controller           ← business logic + DB queries
+                  ↓
+            config/db.js         ← mysql2 pool
                   ↓
             MySQL / MariaDB
                   ↓
@@ -281,7 +312,7 @@ Before you begin, make sure you have the following installed:
 ### Step 1 — Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/event-booking-api.git
+git clone https://github.com/aditya32193213/event-booking-api.git
 cd event-booking-api
 ```
 
@@ -817,7 +848,10 @@ Each layer has exactly one responsibility:
 
 | Layer | Responsibility | Does NOT do |
 |---|---|---|
-| **Routes** | Map HTTP method + path to a controller | No queries, no validation, no logic |
+| **server.js** | Bind TCP port, start HTTP server | No app setup, no middleware, no routes |
+| **app.js** | Create Express app, mount Swagger, middleware, routes | Never calls `listen()` |
+| **routes/index.js** | Register all route prefixes in one place | No handlers, no logic |
+| **Route files** | Map HTTP method + path to a controller | No queries, no validation, no logic |
 | **Controllers** | Business logic + DB queries + response | No HTTP parsing, no error formatting |
 | **Middlewares** | Validation, error classes, async wrappers | No business logic |
 | **config/db.js** | Connection pool singleton | No queries |
@@ -825,6 +859,56 @@ Each layer has exactly one responsibility:
 Routes are deliberately thin — the entire `routes/bookings.js` is:
 ```js
 router.post("/", asyncHandler(createBooking));
+```
+
+---
+
+### 2b. 🔀 Central Route Registry (`routes/index.js`)
+
+Instead of importing 3 route files directly in `app.js`:
+
+```js
+// ❌ Old approach — app.js had to know about every route file
+const eventsRouter   = require("./routes/events");
+const bookingsRouter = require("./routes/bookings");
+const usersRouter    = require("./routes/users");
+app.use("/events",   eventsRouter);
+app.use("/bookings", bookingsRouter);
+app.use("/users",    usersRouter);
+
+// ✅ New approach — app.js imports one file only
+app.use(require("./routes/index"));
+```
+
+And `routes/index.js` owns all the mounting:
+```js
+router.use("/events",   require("./events"));
+router.use("/bookings", require("./bookings"));
+router.use("/users",    require("./users"));
+```
+
+**The benefit:** adding a new resource (e.g. `/venues`) only requires one new line in `routes/index.js`. `app.js` never changes again.
+
+---
+
+### 2c. ✂️ `server.js` vs `app.js` Split
+
+Separating the server start from the app configuration is a Node.js best practice:
+
+| File | Does | Doesn't do |
+|---|---|---|
+| `app.js` | Builds and exports the Express app | Never calls `app.listen()` |
+| `server.js` | Imports app, calls `app.listen()` | No Express config |
+
+**Why it matters:** In tests, you can `const app = require("./app")` and fire HTTP requests with `supertest` without ever binding a real TCP port. If you later switch to HTTPS, you only change `server.js`.
+
+```js
+// server.js — the entire file
+const app  = require("./app");
+app.listen(process.env.PORT || 3000, () => {
+  console.log(`Server   → http://localhost:${PORT}`);
+  console.log(`API Docs → http://localhost:${PORT}/api-docs`);
+});
 ```
 
 ---
