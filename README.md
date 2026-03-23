@@ -31,6 +31,8 @@
 - [❌ Error Handling](#-error-handling)
 - [✅ Input Validation](#-input-validation)
 - [🧠 Architecture & Design Decisions](#-architecture--design-decisions)
+- [🐳 Docker Deployment](#-docker-deployment)
+- [☁️ Railway Deployment (Live Server)](#️-railway-deployment-live-server)
 
 ---
 
@@ -71,8 +73,7 @@
 ```
 event-booking-api/
 │
-├── 📄 server.js                               # 🚀 Entry point — ONLY starts HTTP server (app.listen)
-├── 📄 app.js                                  # ⚙️  Express setup — Swagger, middleware, routes, error handler
+├── 📄 server.js                               # 🚀 Entry point — mounts Express, Swagger, routes
 ├── 📄 swagger.yaml                            # 📖 OpenAPI 3.0 full specification
 ├── 📄 package.json                            # 📦 Dependencies and npm scripts
 ├── 📄 .env                                    # 🔐 Local secrets (git-ignored)
@@ -93,7 +94,6 @@ event-booking-api/
 │   └── 📄 errorHandler.js                     # asyncHandler wrapper + global error handler
 │
 ├── 📁 routes/                                 # 🗺️ Pure HTTP wiring — no logic
-│   ├── 📄 index.js                            # 🔀 Central registry — imports & mounts all routers
 │   ├── 📄 events.js                           # GET/POST /events, POST /events/:id/attendance
 │   ├── 📄 bookings.js                         # POST /bookings
 │   └── 📄 users.js                            # GET /users/:id/bookings
@@ -119,35 +119,12 @@ event-booking-api/
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      server.js                                   │
-│         Entry Point — ONLY binds the port                        │
-│                                                                  │
-│         const app = require("./app");                            │
-│         app.listen(PORT, () => { ... });                         │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │  delegates to
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        app.js                                    │
-│         Express App Setup — Swagger, Middleware, Routes          │
+│              Express Application Entry Point                     │
 │                                                                  │
 │   ┌─────────────────┐    ┌──────────────────────────────────┐   │
 │   │   Swagger UI     │    │      express.json()              │   │
 │   │  /api-docs       │    │   Body Parser Middleware         │   │
 │   └─────────────────┘    └──────────────────────────────────┘   │
-│                                                                  │
-│         app.use(require("./routes/index"))                       │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  routes/index.js  🔀                             │
-│            Central Route Registry                                │
-│                                                                  │
-│   router.use("/events",   eventsRouter)                          │
-│   router.use("/bookings", bookingsRouter)                        │
-│   router.use("/users",    usersRouter)                           │
-│                                                                  │
-│   ← Add new resources here. app.js never needs to change. →     │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
                            ▼
@@ -216,21 +193,15 @@ event-booking-api/
 ### MVC Pattern Summary
 
 ```
-REQUEST  →  server.js            ← only binds the TCP port
+REQUEST  →  Route (wiring only)
                   ↓
-            app.js               ← Express setup, Swagger, middleware mount
+            asyncHandler()          ← catches all async errors
                   ↓
-            routes/index.js      ← central route registry
+            validate.js             ← two-phase input validation
                   ↓
-            Route file           ← wiring only (events/bookings/users)
+            Controller              ← business logic + DB queries
                   ↓
-            asyncHandler()       ← catches all async errors
-                  ↓
-            validate.js          ← two-phase input validation
-                  ↓
-            Controller           ← business logic + DB queries
-                  ↓
-            config/db.js         ← mysql2 pool
+            config/db.js            ← mysql2 pool
                   ↓
             MySQL / MariaDB
                   ↓
@@ -312,7 +283,7 @@ Before you begin, make sure you have the following installed:
 ### Step 1 — Clone the Repository
 
 ```bash
-git clone https://github.com/aditya32193213/event-booking-api.git
+git clone https://github.com/YOUR_USERNAME/event-booking-api.git
 cd event-booking-api
 ```
 
@@ -848,10 +819,7 @@ Each layer has exactly one responsibility:
 
 | Layer | Responsibility | Does NOT do |
 |---|---|---|
-| **server.js** | Bind TCP port, start HTTP server | No app setup, no middleware, no routes |
-| **app.js** | Create Express app, mount Swagger, middleware, routes | Never calls `listen()` |
-| **routes/index.js** | Register all route prefixes in one place | No handlers, no logic |
-| **Route files** | Map HTTP method + path to a controller | No queries, no validation, no logic |
+| **Routes** | Map HTTP method + path to a controller | No queries, no validation, no logic |
 | **Controllers** | Business logic + DB queries + response | No HTTP parsing, no error formatting |
 | **Middlewares** | Validation, error classes, async wrappers | No business logic |
 | **config/db.js** | Connection pool singleton | No queries |
@@ -859,56 +827,6 @@ Each layer has exactly one responsibility:
 Routes are deliberately thin — the entire `routes/bookings.js` is:
 ```js
 router.post("/", asyncHandler(createBooking));
-```
-
----
-
-### 2b. 🔀 Central Route Registry (`routes/index.js`)
-
-Instead of importing 3 route files directly in `app.js`:
-
-```js
-// ❌ Old approach — app.js had to know about every route file
-const eventsRouter   = require("./routes/events");
-const bookingsRouter = require("./routes/bookings");
-const usersRouter    = require("./routes/users");
-app.use("/events",   eventsRouter);
-app.use("/bookings", bookingsRouter);
-app.use("/users",    usersRouter);
-
-// ✅ New approach — app.js imports one file only
-app.use(require("./routes/index"));
-```
-
-And `routes/index.js` owns all the mounting:
-```js
-router.use("/events",   require("./events"));
-router.use("/bookings", require("./bookings"));
-router.use("/users",    require("./users"));
-```
-
-**The benefit:** adding a new resource (e.g. `/venues`) only requires one new line in `routes/index.js`. `app.js` never changes again.
-
----
-
-### 2c. ✂️ `server.js` vs `app.js` Split
-
-Separating the server start from the app configuration is a Node.js best practice:
-
-| File | Does | Doesn't do |
-|---|---|---|
-| `app.js` | Builds and exports the Express app | Never calls `app.listen()` |
-| `server.js` | Imports app, calls `app.listen()` | No Express config |
-
-**Why it matters:** In tests, you can `const app = require("./app")` and fire HTTP requests with `supertest` without ever binding a real TCP port. If you later switch to HTTPS, you only change `server.js`.
-
-```js
-// server.js — the entire file
-const app  = require("./app");
-app.listen(process.env.PORT || 3000, () => {
-  console.log(`Server   → http://localhost:${PORT}`);
-  console.log(`API Docs → http://localhost:${PORT}/api-docs`);
-});
 ```
 
 ---
@@ -944,6 +862,234 @@ The `isAppError: true` flag lets the global `errorHandler` distinguish intention
 |---|---|---|
 | Regular queries | `pool.query()` | Shared pool — efficient for stateless queries |
 | Booking transaction | `pool.getConnection()` | Dedicated connection — transactions must stay on one connection until commit/rollback |
+
+---
+
+---
+
+## 🐳 Docker Deployment
+
+Run the entire stack — API + MySQL — with a **single command**. No local MySQL installation needed.
+
+### Files Added
+
+| File | Purpose |
+|---|---|
+| `Dockerfile` | Builds the Node.js API image using `node:22-alpine` |
+| `docker-compose.yml` | Orchestrates API + MySQL containers together |
+| `.dockerignore` | Excludes `node_modules`, `.env`, logs from the image |
+
+---
+
+### Step 1 — Make sure Docker is installed
+
+Download from [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop) and confirm:
+
+```bash
+docker --version
+docker-compose --version
+```
+
+---
+
+### Step 2 — Create your `.env` file
+
+```bash
+cp .env.example .env
+```
+
+Fill in `.env`:
+```env
+PORT=3000
+DB_HOST=mysql
+DB_USER=root
+DB_PASSWORD=root1234
+DB_NAME=event_booking
+```
+
+> ⚠️ `DB_HOST` must be `mysql` (the Docker service name) — not `localhost`.
+
+---
+
+### Step 3 — Build and start everything
+
+```bash
+docker-compose up --build
+```
+
+Docker will:
+1. 🔨 Build the Node.js API image
+2. 🗄️ Pull and start MySQL 8.0
+3. 📋 Auto-import `models/schema.sql` into the database
+4. ⏳ Wait for MySQL to be healthy before starting the API
+5. 🚀 Start the API server
+
+**Expected output:**
+```
+event_booking_db  | ready for connections
+event_booking_api | Server   → http://localhost:3000
+event_booking_api | API Docs → http://localhost:3000/api-docs
+```
+
+---
+
+### Step 4 — Seed test users
+
+```bash
+docker exec -it event_booking_db mysql -u root -proot1234 event_booking \
+  -e "INSERT INTO users (name, email) VALUES ('Priya Sharma','priya@example.com'),('Arjun Mehta','arjun@example.com');"
+```
+
+---
+
+### Useful Docker Commands
+
+```bash
+# Start in background (detached mode)
+docker-compose up -d --build
+
+# View live logs
+docker-compose logs -f api
+
+# Stop all containers
+docker-compose down
+
+# Stop and DELETE database data (full reset)
+docker-compose down -v
+
+# Rebuild only the API image (after code changes)
+docker-compose up --build api
+```
+
+---
+
+### How it Works Internally
+
+```
+┌─────────────────────────────────────────────────┐
+│              docker-compose.yml                  │
+│                                                  │
+│  ┌──────────────────────┐  ┌─────────────────┐  │
+│  │  api (port 3000)      │  │  mysql (3306)   │  │
+│  │  node:22-alpine       │  │  mysql:8.0      │  │
+│  │                       │  │                 │  │
+│  │  DB_HOST=mysql  ──────┼──► event_booking   │  │
+│  │  (Docker DNS)         │  │  (auto-created) │  │
+│  └──────────────────────┘  └─────────────────┘  │
+│                                                  │
+│  mysql_data volume ── persists DB across restarts│
+└─────────────────────────────────────────────────┘
+```
+
+`DB_HOST=mysql` works because Docker Compose creates an internal DNS where each service is reachable by its **service name**.
+
+---
+
+## ☁️ Railway Deployment (Live Server)
+
+[Railway](https://railway.app) lets you deploy both the Node.js API and a MySQL database for **free** — no credit card needed.
+
+### Step 1 — Create a Railway account
+
+Go to [railway.app](https://railway.app) → **Sign up with GitHub**
+
+---
+
+### Step 2 — Deploy MySQL database
+
+1. Click **New Project**
+2. Select **Deploy a template** → search **MySQL** → click it
+3. Railway provisions a MySQL instance instantly
+4. Click the MySQL service → go to **Variables** tab
+5. Note down these values — you'll need them:
+
+```
+MYSQL_HOST     → shown as "Host" under Connect tab
+MYSQL_PORT     → 3306
+MYSQL_USER     → root
+MYSQL_PASSWORD → auto-generated
+MYSQL_DATABASE → railway
+```
+
+---
+
+### Step 3 — Import your schema into Railway MySQL
+
+In the Railway MySQL service → **Connect** tab → copy the **MySQL CLI** connection string. It looks like:
+
+```bash
+mysql -h <host> -P <port> -u root -p<password> railway
+```
+
+Run it and paste your schema:
+
+```bash
+mysql -h <host> -P <port> -u root -p<password> railway < models/schema.sql
+```
+
+Then seed users:
+```sql
+INSERT INTO users (name, email) VALUES
+  ('Priya Sharma', 'priya@example.com'),
+  ('Arjun Mehta',  'arjun@example.com');
+```
+
+---
+
+### Step 4 — Deploy the Node.js API
+
+1. In your Railway project, click **New Service** → **GitHub Repo**
+2. Select your `event-booking-api` repository
+3. Railway auto-detects Node.js and runs `npm start`
+
+---
+
+### Step 5 — Set environment variables
+
+In the API service → **Variables** tab → add:
+
+```env
+PORT=3000
+DB_HOST=<your Railway MySQL host>
+DB_USER=root
+DB_PASSWORD=<your Railway MySQL password>
+DB_NAME=railway
+```
+
+> 💡 You can also click **"Add from service"** and select your MySQL service — Railway will auto-fill the DB variables.
+
+---
+
+### Step 6 — Get your live URL
+
+Railway auto-generates a public URL for your API:
+
+```
+https://event-booking-api-production.up.railway.app
+```
+
+Click **Settings** → **Networking** → **Generate Domain** if it hasn't appeared yet.
+
+**Test it:**
+```bash
+curl https://your-app.up.railway.app/events
+```
+
+Your Swagger docs will be live at:
+```
+https://your-app.up.railway.app/api-docs
+```
+
+---
+
+### Railway vs Docker — When to Use Which
+
+| Scenario | Use |
+|---|---|
+| Running locally without installing MySQL | 🐳 **Docker** |
+| Sharing a live URL with your reviewer | ☁️ **Railway** |
+| CI/CD and automated testing | 🐳 **Docker** |
+| Free public deployment for assignment submission | ☁️ **Railway** |
 
 ---
 
