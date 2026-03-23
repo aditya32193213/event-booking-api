@@ -16,6 +16,15 @@
 
 ---
 
+## 🌐 Live Deployment
+
+| | Link |
+|---|---|
+| 🚀 **API Base URL** | https://event-booking-api-production.up.railway.app |
+| 📖 **Swagger Docs** | https://event-booking-api-production.up.railway.app/api-docs |
+
+---
+
 ## 📋 Table of Contents
 
 - [✨ Key Features](#-key-features)
@@ -283,7 +292,7 @@ Before you begin, make sure you have the following installed:
 ### Step 1 — Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/event-booking-api.git
+git clone https://github.com/aditya3219313/event-booking-api.git
 cd event-booking-api
 ```
 
