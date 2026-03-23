@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────
+# docker-compose.yml
+# One-click local deployment:
+#   docker-compose up --build
+#
+# Services:
+#   • api   — Node.js Express server (port 3000)
+#   • mysql — MySQL 8 database (port 3306)
+# ─────────────────────────────────────────────────────────────
+version: "3.9"
+
+services:
+
+  # ── MySQL Database ─────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: event_booking_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE:      ${DB_NAME}
+    ports:
+      - "3306:3306"                    # expose to host for GUI tools (Workbench etc.)
+    volumes:
+      - mysql_data:/var/lib/mysql      # persist data across container restarts
+      - ./models/schema.sql:/docker-entrypoint-initdb.d/schema.sql  # auto-import schema on first run
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Node.js API ────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: event_booking_api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT:        ${PORT:-3000}
+      DB_HOST:     mysql            # service name — Docker DNS resolves this automatically
+      DB_USER:     ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME:     ${DB_NAME:-event_booking}
+    depends_on:
+      mysql:
+        condition: service_healthy  # wait for MySQL to be ready before starting API
+    volumes:
+      - .:/app                      # mount source for live reload in dev
+      - /app/node_modules           # anonymous volume keeps container node_modules intact
+
+# ── Named volumes ──────────────────────────────────────────────
+volumes:
+  mysql_data:

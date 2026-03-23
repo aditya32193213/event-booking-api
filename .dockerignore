@@ -1,0 +1,28 @@
+# ── Dependencies ─────────────────────────────
+node_modules
+
+# ── Environment files ─────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Git ──────────────────────────────────────
+.git
+.gitignore
+
+# ── Logs ─────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ── OS files ─────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor folders ───────────────────────────
+.vscode
+.idea
+
+# ── Docker files (no need to copy these in) ──
+Dockerfile
+docker-compose.yml
+.dockerignore

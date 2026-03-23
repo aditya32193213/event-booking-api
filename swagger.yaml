@@ -27,6 +27,8 @@ info:
     email: support@eventbooking.com
 
 servers:
+  - url: https://event-booking-api-production.up.railway.app
+    description: Production server
   - url: http://localhost:3000
     description: Local development server
 
