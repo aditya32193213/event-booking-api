@@ -7,7 +7,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-v22+-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Express](https://img.shields.io/badge/Express-v5-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com/)
 [![MySQL](https://img.shields.io/badge/MySQL/MariaDB-8.0+-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://mysql.com/)
-[![Swagger](https://img.shields.io/badge/Swagger-OpenAPI_3.0-85EA2D?style=for-the-badge&logo=swagger&logoColor=black)](http://localhost:3000/api-docs)
+[![Swagger](https://img.shields.io/badge/Swagger-OpenAPI_3.0-85EA2D?style=for-the-badge&logo=swagger&logoColor=black)](https://event-booking-api-production.up.railway.app/api-docs)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 > **A full-featured event ticketing backend** — browse events, book tickets with race-condition protection, scan QR codes at the door, and view booking history. Built with clean MVC architecture, layered validation, and interactive Swagger docs.
@@ -422,7 +422,7 @@ DB_NAME=event_booking
 
 ### Base URL
 ```
-http://localhost:3000
+https://event-booking-api-production.up.railway.app
 ```
 
 ### Overview
@@ -677,7 +677,7 @@ Step 4:  GET  /users/1/bookings    → Verify booking appears
 Step 5:  POST /events/1/attendance → Check in using the unique_code
 ```
 
-The collection uses a `{{baseUrl}}` variable defaulting to `http://localhost:3000`. Change it in Collection Variables if your server runs on a different port.
+The collection uses a `{{baseUrl}}` variable defaulting to `https://event-booking-api-production.up.railway.app`. Change it in Collection Variables if testing locally.
 
 ---
 
@@ -1081,12 +1081,12 @@ Click **Settings** → **Networking** → **Generate Domain** if it hasn't appea
 
 **Test it:**
 ```bash
-curl https://your-app.up.railway.app/events
+curl https://event-booking-api-production.up.railway.app/events
 ```
 
 Your Swagger docs will be live at:
 ```
-https://your-app.up.railway.app/api-docs
+https://event-booking-api-production.up.railway.app/api-docs
 ```
 
 ---
