@@ -7,8 +7,8 @@ info:
 
     ## Features
     - Browse and create upcoming events
-    - Book tickets with race-condition-safe transactions
-    - Track event attendance via unique booking codes
+    - Book tickets (single or multiple) with race-condition-safe transactions
+    - Track event attendance via unique booking codes (UUID v4)
     - View all bookings per user
 
     ## Error Format
@@ -21,7 +21,7 @@ info:
     }
     ```
     Validation errors also include an `errors` array with every broken rule.
-  version: 1.0.0
+  version: 1.1.0
   contact:
     name: API Support
     email: support@eventbooking.com
@@ -42,14 +42,8 @@ tags:
   - name: Attendance
     description: Record and verify event check-ins
 
-# ──────────────────────────────────────────────────────────────
-# REUSABLE COMPONENTS
-# ──────────────────────────────────────────────────────────────
 components:
-
-  # ── Schemas ──────────────────────────────────────────────────
   schemas:
-
     Event:
       type: object
       properties:
@@ -58,17 +52,24 @@ components:
           example: 1
         title:
           type: string
+          maxLength: 200
+          description: Event title (HTML tags are rejected at input)
           example: "Node.js Workshop 2025"
         description:
           type: string
           nullable: true
+          maxLength: 2000
+          description: Event description (HTML tags are rejected)
           example: "A hands-on workshop covering Express, MySQL, and REST API design."
         date:
           type: string
           format: date-time
+          description: Must be in the future and within 2 years from now
           example: "2025-11-15T18:00:00.000Z"
         total_capacity:
           type: integer
+          minimum: 1
+          maximum: 100000
           example: 100
         remaining_tickets:
           type: integer
@@ -86,12 +87,20 @@ components:
         event_id:
           type: integer
           example: 1
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 1
+          description: Number of tickets booked
+          example: 2
         event_title:
           type: string
           example: "Node.js Workshop 2025"
         unique_code:
           type: string
           format: uuid
+          description: UUID v4 used for check-in
           example: "550e8400-e29b-41d4-a716-446655440000"
         booking_date:
           type: string
@@ -113,15 +122,21 @@ components:
           type: string
           format: uuid
           example: "550e8400-e29b-41d4-a716-446655440000"
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
         event_id:
           type: integer
           example: 1
         event_title:
           type: string
+          maxLength: 200
           example: "Node.js Workshop 2025"
         event_description:
           type: string
           nullable: true
+          maxLength: 2000
           example: "A hands-on workshop covering Express, MySQL, and REST API design."
         event_date:
           type: string
@@ -149,10 +164,9 @@ components:
           example: "550e8400-e29b-41d4-a716-446655440000"
         total_bookings:
           type: integer
-          description: Total number of tickets sold for this event
+          description: Total number of tickets sold (sum of quantities)
           example: 13
 
-    # ── Request bodies ────────────────────────────────────────
     CreateEventBody:
       type: object
       required:
@@ -163,19 +177,27 @@ components:
         title:
           type: string
           minLength: 1
+          maxLength: 200
+          pattern: '^(?!.*<[^>]*>).*$'
+          description: Event title (no HTML or JavaScript allowed)
           example: "Node.js Workshop 2025"
         description:
           type: string
           nullable: true
+          maxLength: 2000
+          pattern: '^(?!.*<[^>]*>).*$'
+          description: Event description (no HTML allowed)
           example: "A hands-on workshop covering Express, MySQL, and REST API design."
         date:
           type: string
           format: date-time
-          description: Must be a future date-time in ISO 8601 format
+          description: |
+            Must be a valid ISO 8601 date-time in the future and not more than 2 years from now.
           example: "2025-11-15T18:00:00"
         total_capacity:
           type: integer
           minimum: 1
+          maximum: 100000
           example: 100
 
     CreateBookingBody:
@@ -187,11 +209,20 @@ components:
         user_id:
           type: integer
           minimum: 1
+          maximum: 999999999
           example: 7
         event_id:
           type: integer
           minimum: 1
+          maximum: 999999999
           example: 1
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 1
+          description: Number of tickets to book (max 100 per request)
+          example: 2
 
     AttendanceBody:
       type: object
@@ -201,9 +232,10 @@ components:
         booking_code:
           type: string
           format: uuid
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          description: UUID v4 returned from POST /bookings
           example: "550e8400-e29b-41d4-a716-446655440000"
 
-    # ── Error responses ───────────────────────────────────────
     Error400:
       type: object
       properties:
@@ -264,7 +296,6 @@ components:
           type: string
           example: "Internal server error"
 
-  # ── Reusable responses ────────────────────────────────────────
   responses:
     BadRequest:
       description: Validation failed — one or more required fields are missing or invalid
@@ -294,20 +325,16 @@ components:
           schema:
             $ref: "#/components/schemas/Error500"
 
-# ──────────────────────────────────────────────────────────────
-# PATHS
-# ──────────────────────────────────────────────────────────────
 paths:
-
-  # ── GET /events ───────────────────────────────────────────────
   /events:
     get:
       tags:
         - Events
       summary: List all upcoming events
       description: |
-        Returns every event whose date is **today or in the future**, sorted
-        chronologically by event date (ascending).
+        Returns every event whose date is today or in the future, sorted
+        chronologically by event date (ascending). All titles and descriptions are
+        escaped to prevent XSS.
       operationId: getEvents
       responses:
         "200":
@@ -347,7 +374,6 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-    # ── POST /events ─────────────────────────────────────────────
     post:
       tags:
         - Events
@@ -356,11 +382,11 @@ paths:
         Creates a new event. `remaining_tickets` is automatically set equal
         to `total_capacity` on creation.
 
-        **Validation rules:**
-        - `title` — required, non-empty string
-        - `date` — required, valid ISO 8601 date-time, **must be in the future**
-        - `total_capacity` — required, positive integer
-        - `description` — optional string
+        Strict validation rules:
+        - **title** — required, non-empty, max 200 chars, no HTML/JavaScript tags (XSS prevention)
+        - **description** — optional, max 2000 chars, no HTML/JavaScript tags
+        - **date** — required, valid ISO 8601, must be in the future, and not more than 2 years from now
+        - **total_capacity** — required, integer between 1 and 100,000
       operationId: createEvent
       requestBody:
         required: true
@@ -410,8 +436,8 @@ paths:
                   remaining_tickets: 100
         "400":
           description: |
-            Validation failed. The `errors` array lists **every** broken rule so the
-            client can fix all problems in one round-trip.
+            Validation failed. The `errors` array lists every broken rule.
+            Common reasons: HTML in title/description, date too far in the future, capacity > 100k.
           content:
             application/json:
               schema:
@@ -434,28 +460,36 @@ paths:
                     error: "date must be in the future"
                     errors:
                       - "date must be in the future"
+                htmlInTitle:
+                  summary: HTML tag detected
+                  value:
+                    success: false
+                    status: 400
+                    error: "title contains HTML, JavaScript, or invalid entities (XSS prevention)"
+                    errors:
+                      - "title contains HTML, JavaScript, or invalid entities (XSS prevention)"
         "500":
           $ref: "#/components/responses/InternalError"
 
-  # ── POST /bookings ────────────────────────────────────────────
   /bookings:
     post:
       tags:
         - Bookings
-      summary: Book a ticket for an event
+      summary: Book one or more tickets for an event
       description: |
-        Creates a booking for a user-event pair. This endpoint is the most
-        sensitive in the system and runs inside a **MySQL transaction with a
-        row-level lock** (`SELECT ... FOR UPDATE`) to prevent overselling
-        under concurrent load.
+        Creates a booking for a user-event pair. Supports booking multiple tickets in a single
+        request via the `quantity` field (default = 1, max = 100).
 
-        **Business rules enforced:**
-        1. Event must exist
-        2. At least 1 ticket must remain (`remaining_tickets > 0`)
-        3. User must exist
-        4. User cannot book the same event twice
-        5. `remaining_tickets` is decremented atomically
-        6. A UUID `unique_code` is generated — use this for QR code generation
+        This endpoint runs inside a MySQL transaction with row-level lock (`SELECT ... FOR UPDATE`)
+        to prevent overselling under concurrent load.
+
+        Business rules enforced:
+        - Event must exist
+        - `remaining_tickets >= quantity`
+        - User must exist
+        - User cannot book the same event twice (update not supported yet)
+        - `remaining_tickets` is decremented by `quantity`
+        - A UUID v4 `unique_code` is generated — use this for check-in
       operationId: createBooking
       requestBody:
         required: true
@@ -463,9 +497,18 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateBookingBody"
-            example:
-              user_id: 7
-              event_id: 1
+            examples:
+              singleTicket:
+                summary: Book 1 ticket (default)
+                value:
+                  user_id: 7
+                  event_id: 1
+              multipleTickets:
+                summary: Book 3 tickets
+                value:
+                  user_id: 7
+                  event_id: 1
+                  quantity: 3
       responses:
         "201":
           description: Booking confirmed
@@ -479,31 +522,59 @@ paths:
                     example: true
                   message:
                     type: string
-                    example: "Booking confirmed"
+                    example: "Booking confirmed for 2 ticket(s)"
                   data:
                     $ref: "#/components/schemas/Booking"
-              example:
-                success: true
-                message: "Booking confirmed"
-                data:
-                  booking_id: 42
-                  user_id: 7
-                  event_id: 1
-                  event_title: "Node.js Workshop 2025"
-                  unique_code: "550e8400-e29b-41d4-a716-446655440000"
-                  booking_date: "2025-10-01T09:30:00.000Z"
+              examples:
+                single:
+                  summary: Single ticket
+                  value:
+                    success: true
+                    message: "Booking confirmed"
+                    data:
+                      booking_id: 42
+                      user_id: 7
+                      event_id: 1
+                      quantity: 1
+                      event_title: "Node.js Workshop 2025"
+                      unique_code: "550e8400-e29b-41d4-a716-446655440000"
+                      booking_date: "2025-10-01T09:30:00.000Z"
+                multiple:
+                  summary: Multiple tickets
+                  value:
+                    success: true
+                    message: "Booking confirmed for 3 ticket(s)"
+                    data:
+                      booking_id: 43
+                      user_id: 7
+                      event_id: 1
+                      quantity: 3
+                      event_title: "Node.js Workshop 2025"
+                      unique_code: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                      booking_date: "2025-10-01T09:35:00.000Z"
         "400":
-          description: Invalid request body (missing or non-integer IDs)
+          description: Invalid request body (missing fields, non-integer IDs, quantity out of range)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error400"
-              example:
-                success: false
-                status: 400
-                error: "user_id must be a positive integer"
-                errors:
-                  - "user_id must be a positive integer"
+              examples:
+                invalidUserId:
+                  summary: user_id not a positive integer
+                  value:
+                    success: false
+                    status: 400
+                    error: "user_id must be a positive integer"
+                    errors:
+                      - "user_id must be a positive integer"
+                quantityTooHigh:
+                  summary: Quantity exceeds maximum
+                  value:
+                    success: false
+                    status: 400
+                    error: "quantity cannot exceed 100 per booking"
+                    errors:
+                      - "quantity cannot exceed 100 per booking"
         "404":
           description: User or event not found
           content:
@@ -524,7 +595,7 @@ paths:
                     status: 404
                     error: "User not found"
         "409":
-          description: Conflict — sold out or duplicate booking
+          description: Conflict — sold out, duplicate booking, or insufficient tickets
           content:
             application/json:
               schema:
@@ -536,16 +607,21 @@ paths:
                     success: false
                     status: 409
                     error: "No tickets remaining for this event"
+                insufficient:
+                  summary: Requested quantity exceeds remaining tickets
+                  value:
+                    success: false
+                    status: 409
+                    error: "Only 2 tickets available"
                 duplicate:
                   summary: User already booked this event
                   value:
                     success: false
                     status: 409
-                    error: "User has already booked this event"
+                    error: "User has already booked this event (update quantity not supported yet)"
         "500":
           $ref: "#/components/responses/InternalError"
 
-  # ── GET /users/:id/bookings ───────────────────────────────────
   /users/{id}/bookings:
     get:
       tags:
@@ -554,16 +630,18 @@ paths:
       description: |
         Returns all bookings made by a specific user, joined with full event
         details. Results are sorted by `booking_date` descending (most recent first).
+        Includes the quantity of tickets per booking.
       operationId: getUserBookings
       parameters:
         - name: id
           in: path
           required: true
-          description: The user's unique ID (positive integer)
+          description: The user's unique ID (positive integer, max 999,999,999)
           schema:
             type: integer
             minimum: 1
-            example: 7
+            maximum: 999999999
+          example: 7
       responses:
         "200":
           description: User bookings retrieved successfully
@@ -605,6 +683,7 @@ paths:
                   - booking_id: 42
                     booking_date: "2025-10-01T09:30:00.000Z"
                     unique_code: "550e8400-e29b-41d4-a716-446655440000"
+                    quantity: 2
                     event_id: 1
                     event_title: "Node.js Workshop 2025"
                     event_description: "A hands-on workshop covering Express, MySQL, and REST API design."
@@ -614,6 +693,7 @@ paths:
                   - booking_id: 38
                     booking_date: "2025-09-20T14:00:00.000Z"
                     unique_code: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                    quantity: 1
                     event_id: 2
                     event_title: "React Summit Delhi"
                     event_description: null
@@ -637,7 +717,6 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  # ── POST /events/:id/attendance ───────────────────────────────
   /events/{id}/attendance:
     post:
       tags:
@@ -645,13 +724,13 @@ paths:
       summary: Record attendance via booking code
       description: |
         Scans a booking code and records the attendee's entry. This is the
-        **check-in endpoint** — call it when scanning a ticket QR code at the door.
+        check-in endpoint — call it when scanning a ticket QR code at the door.
 
-        **Business rules enforced:**
-        1. Event must exist
-        2. `booking_code` must belong to this specific event
-        3. A booking code can only be scanned **once** (duplicate check at both app and DB level)
-        4. Returns the total number of tickets sold for the event (useful for real-time dashboards)
+        Business rules enforced:
+        - Event must exist
+        - `booking_code` must be a valid UUID v4 and belong to this specific event
+        - A booking code can only be scanned once (duplicate check at both app and DB level)
+        - Returns the total number of tickets sold (`SUM(quantity)`) for the event (useful for real-time dashboards)
       operationId: recordAttendance
       parameters:
         - name: id
@@ -661,7 +740,8 @@ paths:
           schema:
             type: integer
             minimum: 1
-            example: 1
+            maximum: 999999999
+          example: 1
       requestBody:
         required: true
         content:
@@ -695,17 +775,28 @@ paths:
                   booking_code: "550e8400-e29b-41d4-a716-446655440000"
                   total_bookings: 13
         "400":
-          description: Missing or empty booking_code, or invalid event ID
+          description: Missing or empty booking_code, invalid event ID, or malformed UUID
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error400"
-              example:
-                success: false
-                status: 400
-                error: "booking_code is required and must be a non-empty string"
-                errors:
-                  - "booking_code is required and must be a non-empty string"
+              examples:
+                missingCode:
+                  summary: booking_code not provided
+                  value:
+                    success: false
+                    status: 400
+                    error: "booking_code is required and must be a non-empty string"
+                    errors:
+                      - "booking_code is required and must be a non-empty string"
+                invalidUuid:
+                  summary: booking_code is not a valid UUID v4
+                  value:
+                    success: false
+                    status: 400
+                    error: "booking_code must be a valid UUID v4"
+                    errors:
+                      - "booking_code must be a valid UUID v4"
         "404":
           description: Event not found, or booking code does not belong to this event
           content:

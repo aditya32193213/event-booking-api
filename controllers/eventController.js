@@ -6,6 +6,7 @@ const {
   validateAttendance,
   validateEventId,
 } = require("../middlewares/validate");
+const escape = require("escape-html");
 
 // ─────────────────────────────────────────────────────────────
 // GET /events — returns all upcoming events, sorted by date ASC
@@ -24,10 +25,17 @@ const getAllEvents = async (req, res) => {
      ORDER BY date ASC`
   );
 
+  // Escape title and description to prevent XSS
+  const sanitizedEvents = events.map(event => ({
+    ...event,
+    title: escape(event.title),
+    description: event.description ? escape(event.description) : null,
+  }));
+
   res.status(200).json({
     success: true,
-    count:   events.length,
-    data:    events,
+    count:   sanitizedEvents.length,
+    data:    sanitizedEvents,
   });
 };
 
@@ -37,23 +45,25 @@ const getAllEvents = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 const createEvent = async (req, res) => {
   validateCreateEvent(req.body);
-
   const { title, description, date, total_capacity } = req.body;
   const capacity = Number(total_capacity);
+  const trimmedTitle = title.trim();
+  const trimmedDesc = description?.trim() || null;
 
   const [result] = await pool.query(
     `INSERT INTO events (title, description, date, total_capacity, remaining_tickets)
      VALUES (?, ?, ?, ?, ?)`,
-    [title.trim(), description?.trim() || null, new Date(date), capacity, capacity]
+    [trimmedTitle, trimmedDesc, new Date(date), capacity, capacity]
   );
 
+  // Return escaped values
   res.status(201).json({
     success: true,
     message: "Event created successfully",
     data: {
       id:                result.insertId,
-      title:             title.trim(),
-      description:       description?.trim() || null,
+      title:             escape(trimmedTitle),
+      description:       trimmedDesc ? escape(trimmedDesc) : null,
       date:              new Date(date),
       total_capacity:    capacity,
       remaining_tickets: capacity,
@@ -105,18 +115,19 @@ const recordAttendance = async (req, res) => {
 
   // 5. Count total tickets sold for this event
   const [[{ total_bookings }]] = await pool.query(
-    `SELECT COUNT(*) AS total_bookings FROM bookings WHERE event_id = ?`,
+    `SELECT SUM(quantity) AS total_bookings FROM bookings WHERE event_id = ?`,
     [eventId]
   );
+  const ticketCount = total_bookings || 0;
 
   res.status(200).json({
     success: true,
     message: "Attendance recorded successfully",
     data: {
       event_id:       eventId,
-      event_title:    event.title,
+      event_title:    escape(event.title),
       booking_code:   booking.unique_code,
-      total_bookings: Number(total_bookings),
+      total_bookings: ticketCount,
     },
   });
 };

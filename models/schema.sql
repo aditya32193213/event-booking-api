@@ -43,12 +43,13 @@ CREATE TABLE bookings (
     id           INT          NOT NULL AUTO_INCREMENT,
     user_id      INT          NOT NULL,
     event_id     INT          NOT NULL,
+    quantity     INT          NOT NULL DEFAULT 1 CHECK (quantity > 0),
     booking_date DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    unique_code  VARCHAR(64)  NOT NULL,   -- e.g. UUID / short-code for QR
+    unique_code  VARCHAR(64)  NOT NULL,
 
     PRIMARY KEY (id),
-    UNIQUE KEY uq_bookings_unique_code (unique_code),          -- codes must be globally unique
-    UNIQUE KEY uq_bookings_user_event  (user_id, event_id),    -- one booking per user per event
+    UNIQUE KEY uq_bookings_unique_code (unique_code),
+    UNIQUE KEY uq_bookings_user_event  (user_id, event_id),
 
     CONSTRAINT fk_bookings_user
         FOREIGN KEY (user_id)  REFERENCES users  (id) ON DELETE CASCADE,

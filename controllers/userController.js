@@ -2,6 +2,7 @@
 const pool     = require("../config/db");          
 const AppError = require("../middlewares/AppError");
 const { validateUserId } = require("../middlewares/validate");
+const escape = require("escape-html");
 
 // ─────────────────────────────────────────────────────────────
 // GET /users/:id/bookings
@@ -10,7 +11,6 @@ const { validateUserId } = require("../middlewares/validate");
 // ─────────────────────────────────────────────────────────────
 const getUserBookings = async (req, res) => {
   validateUserId(req.params.id);
-
   const userId = Number(req.params.id);
 
   const [[user]] = await pool.query(
@@ -19,11 +19,12 @@ const getUserBookings = async (req, res) => {
   );
   if (!user) throw AppError.notFound("User not found");
 
-  const [bookings] = await pool.query(
+  let [bookings] = await pool.query(
     `SELECT
        b.id            AS booking_id,
        b.booking_date,
        b.unique_code,
+       b.quantity,                     -- we'll add this column later
        e.id            AS event_id,
        e.title         AS event_title,
        e.description   AS event_description,
@@ -37,9 +38,16 @@ const getUserBookings = async (req, res) => {
     [userId]
   );
 
+  // Escape event title & description
+  bookings = bookings.map(booking => ({
+    ...booking,
+    event_title: escape(booking.event_title),
+    event_description: booking.event_description ? escape(booking.event_description) : null,
+  }));
+
   res.status(200).json({
     success: true,
-    user:    { id: user.id, name: user.name, email: user.email },
+    user:    { id: user.id, name: escape(user.name), email: user.email },
     count:   bookings.length,
     data:    bookings,
   });

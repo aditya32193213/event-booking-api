@@ -51,14 +51,16 @@
 |---|---|---|
 | 🎫 | **Event Management** | Create and browse upcoming events with full capacity tracking |
 | 🔐 | **Race-Condition-Safe Booking** | MySQL transactions with `SELECT ... FOR UPDATE` row-level locking prevents overselling under concurrent load |
+| 🔁 | **Smart Quantity Updates** | Re-booking the same event adds tickets to the existing booking rather than rejecting — no duplicate entry errors |
 | 🆔 | **UUID Ticket Codes** | Auto-generated UUID v4 per booking — instantly QR-code ready |
 | 🚪 | **Attendance Check-In** | Scan booking codes at the door; duplicate scans blocked at both app & DB level |
-| 📋 | **Booking History** | Full per-user booking history with joined event details |
+| 📋 | **Booking History** | Full per-user booking history with joined event details and per-booking quantity |
 | 📚 | **Interactive Swagger UI** | Live, testable API docs served at `/api-docs` |
 | 🛡️ | **Two-Phase Validation** | Collect ALL errors in Phase 1, short-circuit dependent rules in Phase 2 |
 | 🏗️ | **Clean MVC Architecture** | Routes → Controllers → DB with zero business logic in route files |
 | ⚡ | **Async Error Pipeline** | `asyncHandler` wrapper eliminates try/catch boilerplate from every route |
 | 🗃️ | **Connection Pooling** | `mysql2` promise pool with configurable limits for production use |
+| 🔒 | **XSS Prevention** | Input validated against HTML/JS injection patterns; output escaped via `escape-html` |
 
 ---
 
@@ -72,6 +74,7 @@
 | 🔌 **DB Driver** | mysql2 | v3.20.0 | Promise-based async queries + connection pooling |
 | 📖 **API Docs** | swagger-ui-express + yamljs | v5.0.1 | Interactive OpenAPI 3.0 documentation UI |
 | 🆔 **Unique IDs** | uuid | v11.0.0 | UUID v4 generation for unique booking codes |
+| 🔒 **Output Escaping** | escape-html | v1.0.3 | Sanitizes title/description/name fields in all responses |
 | 🔧 **Config** | dotenv | v16.4.5 | Environment variable management |
 | 🔄 **Dev Server** | nodemon | v3.1.14 | Auto-restart on file changes during development |
 
@@ -82,35 +85,41 @@
 ```
 event-booking-api/
 │
-├── 📄 server.js                               # 🚀 Entry point — mounts Express, Swagger, routes
-├── 📄 swagger.yaml                            # 📖 OpenAPI 3.0 full specification
-├── 📄 package.json                            # 📦 Dependencies and npm scripts
-├── 📄 .env                                    # 🔐 Local secrets (git-ignored)
-├── 📄 .env.example                            # 📋 Environment variable template
-├── 📄 .gitignore                              # 🚫 Ignores node_modules, .env
+├── 📄 app.js                                  # ⚙️  Express setup — body parser, Swagger UI, routes, error handler
+├── 📄 server.js                               # 🚀  Entry point — binds HTTP server to port (imports app.js)
+├── 📄 swagger.yaml                            # 📖  OpenAPI 3.0 full specification
+├── 📄 package.json                            # 📦  Dependencies and npm scripts
+├── 📄 .env                                    # 🔐  Local secrets (git-ignored)
+├── 📄 .env.example                            # 📋  Environment variable template
+├── 📄 .gitignore                              # 🚫  Ignores node_modules, .env
 │
 ├── 📁 config/
-│   └── 📄 db.js                               # 🔌 mysql2 connection pool setup
+│   └── 📄 db.js                               # 🔌  mysql2 connection pool — shared across all controllers
 │
-├── 📁 controllers/                            # 🧠 ALL business logic lives here
+├── 📁 controllers/                            # 🧠  ALL business logic lives here
 │   ├── 📄 eventController.js                  # getAllEvents, createEvent, recordAttendance
-│   ├── 📄 bookingController.js                # createBooking (transaction + FOR UPDATE lock)
-│   └── 📄 userController.js                   # getUserBookings (JOIN query)
+│   ├── 📄 bookingController.js                # createBooking (transaction + FOR UPDATE lock + quantity update)
+│   └── 📄 userController.js                   # getUserBookings (JOIN query with quantity)
 │
-├── 📁 middlewares/                            # 🛡️ Cross-cutting concerns
-│   ├── 📄 AppError.js                         # Typed error class: badRequest/notFound/conflict
+├── 📁 middlewares/                            # 🛡️  Cross-cutting concerns
+│   ├── 📄 AppError.js                         # Typed error class: badRequest / notFound / conflict / internal
 │   ├── 📄 validate.js                         # assertAll + assertChain two-phase validators
 │   └── 📄 errorHandler.js                     # asyncHandler wrapper + global error handler
 │
-├── 📁 routes/                                 # 🗺️ Pure HTTP wiring — no logic
+├── 📁 routes/                                 # 🗺️  Pure HTTP wiring — zero logic
+│   ├── 📄 index.js                            # Central registry — mounts all sub-routers in one place
 │   ├── 📄 events.js                           # GET/POST /events, POST /events/:id/attendance
 │   ├── 📄 bookings.js                         # POST /bookings
 │   └── 📄 users.js                            # GET /users/:id/bookings
 │
 ├── 📁 models/
-│   └── 📄 schema.sql                          # 🗄️ Full DB schema — run once to set up
+│   └── 📄 schema.sql                          # 🗄️  Full DB schema — run once to set up
 │
-└── 📄 EventBooking.postman_collection.json    # 🧪 Postman collection with all 5 requests
+├── 📄 Dockerfile                              # 🐳  Builds Node.js image (node:22-alpine, production deps only)
+├── 📄 docker-compose.yml                      # 🐳  Orchestrates API + MySQL 8 containers
+├── 📄 .dockerignore                           # 🐳  Excludes node_modules, .env, logs, editor files
+│
+└── 📄 EventBooking.postman_collection.json    # 🧪  Postman collection with all 5 requests
 ```
 
 ---
@@ -128,11 +137,17 @@ event-booking-api/
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      server.js                                   │
-│              Express Application Entry Point                     │
+│         Entry Point — binds port, imports app.js                 │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       app.js                                     │
+│              Express Application Configuration                   │
 │                                                                  │
 │   ┌─────────────────┐    ┌──────────────────────────────────┐   │
 │   │   Swagger UI     │    │      express.json()              │   │
-│   │  /api-docs       │    │   Body Parser Middleware         │   │
+│   │   /api-docs      │    │   Body Parser Middleware         │   │
 │   └─────────────────┘    └──────────────────────────────────┘   │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
@@ -141,12 +156,13 @@ event-booking-api/
 │                    ROUTES LAYER  🗺️                              │
 │                  (Pure HTTP wiring)                              │
 │                                                                  │
-│   routes/events.js   routes/bookings.js   routes/users.js       │
-│        │                    │                   │                │
-│        └────────────────────┼───────────────────┘                │
-└─────────────────────────────┼───────────────────────────────────┘
-                              │  asyncHandler wraps each controller
-                              ▼
+│             routes/index.js  (central registry)                  │
+│                       │                                          │
+│        ┌──────────────┼──────────────┐                           │
+│   events.js      bookings.js      users.js                       │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │  asyncHandler wraps each controller
+                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                  MIDDLEWARES LAYER  🛡️                           │
 │                                                                  │
@@ -170,8 +186,8 @@ event-booking-api/
 │  │  createEvent()        │  │  • beginTransaction()           │  │
 │  │  recordAttendance()   │  │  • SELECT ... FOR UPDATE        │  │
 │  └─────────────────────┘  │  • availability check            │  │
-│                            │  • decrement tickets             │  │
-│  ┌─────────────────────┐  │  • INSERT booking + UUID         │  │
+│                            │  • new booking OR qty update     │  │
+│  ┌─────────────────────┐  │  • decrement tickets atomically  │  │
 │  │  userController      │  │  • commit() / rollback()        │  │
 │  │  ─────────────────── │  └──────────────────────────────────┘  │
 │  │  getUserBookings()    │                                        │
@@ -190,12 +206,12 @@ event-booking-api/
 │    │          │  │          │  │          │  │  attendance │  │
 │    │ id (PK)  │  │ id (PK)  │  │ id (PK)  │  │             │  │
 │    │ name     │  │ title    │  │ user_id ─┼──│ user_id     │  │
-│    │ email    │  │ descr.   │  │ event_id ┼──│ entry_time  │  │
-│    │          │  │ date     │  │ book_date│  │ booking_code│  │
+│    │ email    │  │ descr.   │  │ event_id │  │ entry_time  │  │
+│    │          │  │ date     │  │ quantity │  │ booking_code│  │
 │    │          │  │ capacity │  │ uniq_code│  │             │  │
 │    └──────────┘  │ remaining│  └──────────┘  └─────────────┘  │
 │                   └──────────┘                                   │
-│              MySQL 8+ / MariaDB 11.8                             │
+│              MySQL 8+ / MariaDB 11+                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -204,13 +220,13 @@ event-booking-api/
 ```
 REQUEST  →  Route (wiring only)
                   ↓
-            asyncHandler()          ← catches all async errors
+            asyncHandler()          ← catches all async errors, forwards to next(err)
                   ↓
             validate.js             ← two-phase input validation
                   ↓
             Controller              ← business logic + DB queries
                   ↓
-            config/db.js            ← mysql2 pool
+            config/db.js            ← mysql2 pool (or dedicated conn for transactions)
                   ↓
             MySQL / MariaDB
                   ↓
@@ -244,6 +260,7 @@ RESPONSE  ←  JSON (consistent shape)
                                └──┤ 🔑 id           INT PK             │
                                   │ 🔗 user_id       INT FK → users     │
                                   │ 🔗 event_id      INT FK → events    │
+                                  │    quantity      INT DEFAULT 1      │
                                   │    booking_date  DATETIME DEFAULT   │
                                   │    unique_code   VARCHAR(64) UNIQUE │
                                   │    [UNIQUE user_id + event_id]      │
@@ -264,15 +281,15 @@ RESPONSE  ←  JSON (consistent shape)
 
 ### Table Descriptions
 
-| Table | Rows | Key Constraints |
+| Table | Purpose | Key Constraints |
 |---|---|---|
 | `users` | User registry | `UNIQUE` on `email` |
 | `events` | Event catalog | `CHECK` constraints on capacity; `remaining_tickets <= total_capacity` |
-| `bookings` | Ticket bookings | `UNIQUE` on `unique_code`; composite `UNIQUE(user_id, event_id)` prevents duplicate bookings |
+| `bookings` | Ticket bookings | `quantity` column tracks tickets per booking; `UNIQUE` on `unique_code`; composite `UNIQUE(user_id, event_id)` ensures one booking record per user per event |
 | `event_attendance` | Check-in log | `UNIQUE` on `booking_code` prevents duplicate scans; FK to `bookings.unique_code` |
 
 ### Why `booking_code` links attendance to bookings?
-Attendance uses `booking_code` (not `booking_id`) as the FK because real-world check-in scans a **code** (QR/barcode), not a database ID. This mirrors actual event-door workflows and enforces the scan uniqueness at the DB level as a final guard.
+Attendance uses `booking_code` (not `booking_id`) as the FK because real-world check-in scans a **code** (QR/barcode), not a database ID. This mirrors actual event-door workflows and enforces scan uniqueness at the DB level as a final guard.
 
 ---
 
@@ -304,7 +321,7 @@ cd event-booking-api
 npm install
 ```
 
-This installs: `express`, `mysql2`, `uuid`, `dotenv`, `swagger-ui-express`, `yamljs`, and `nodemon`.
+This installs: `express`, `mysql2`, `uuid`, `dotenv`, `escape-html`, `swagger-ui-express`, `yamljs`, and `nodemon`.
 
 ---
 
@@ -427,11 +444,11 @@ https://event-booking-api-production.up.railway.app
 
 ### Overview
 
-| # | Method | Endpoint | Description | Status |
+| # | Method | Endpoint | Description | Success Status |
 |---|---|---|---|---|
 | 1 | `GET` | `/events` | List all upcoming events | `200` |
 | 2 | `POST` | `/events` | Create a new event | `201` |
-| 3 | `POST` | `/bookings` | Book a ticket for an event | `201` |
+| 3 | `POST` | `/bookings` | Book tickets — creates new booking or adds to existing | `201` |
 | 4 | `GET` | `/users/:id/bookings` | Get all bookings for a user | `200` |
 | 5 | `POST` | `/events/:id/attendance` | Record check-in via booking code | `200` |
 
@@ -439,7 +456,8 @@ https://event-booking-api-production.up.railway.app
 
 ### 1️⃣ GET `/events` — List Upcoming Events
 
-Returns all events with `date >= NOW()`, sorted chronologically.
+Returns all events with `date >= NOW()`, sorted chronologically (ascending).
+All titles and descriptions are HTML-escaped in the response to prevent XSS.
 
 **Request:** No body or parameters required.
 
@@ -465,6 +483,8 @@ Returns all events with `date >= NOW()`, sorted chronologically.
 
 ### 2️⃣ POST `/events` — Create a New Event
 
+`remaining_tickets` is automatically set equal to `total_capacity` on creation.
+
 **Request Body:**
 ```json
 {
@@ -477,10 +497,10 @@ Returns all events with `date >= NOW()`, sorted chronologically.
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
-| `title` | string | ✅ | Non-empty string |
-| `date` | string (ISO 8601) | ✅ | Valid date-time AND must be in the future |
-| `total_capacity` | integer | ✅ | Positive integer (> 0) |
-| `description` | string | ❌ | Optional — string or null |
+| `title` | string | ✅ | Non-empty, max 200 chars, no HTML/JavaScript tags |
+| `date` | string (ISO 8601) | ✅ | Valid date-time, must be in the future, max 2 years from now |
+| `total_capacity` | integer | ✅ | Positive integer, max 100,000 |
+| `description` | string | ❌ | Optional, max 2,000 chars, no HTML/JavaScript tags |
 
 **Response `201 Created`:**
 ```json
@@ -500,47 +520,80 @@ Returns all events with `date >= NOW()`, sorted chronologically.
 
 ---
 
-### 3️⃣ POST `/bookings` — Book a Ticket ⭐ Most Complex
+### 3️⃣ POST `/bookings` — Book Tickets ⭐ Most Complex
 
-Books a ticket inside a **MySQL transaction with a row-level lock** to prevent race conditions.
+Books tickets inside a **MySQL transaction with a row-level lock** to prevent race conditions.
+
+Supports an optional `quantity` field (default `1`, max `100`). If the user has **already booked the same event**, the request **adds tickets** to the existing booking rather than returning a conflict error.
 
 **Request Body:**
 ```json
 {
   "user_id": 1,
-  "event_id": 1
+  "event_id": 1,
+  "quantity": 2
 }
 ```
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `user_id` | integer | ✅ | Positive integer, max 999,999,999 |
+| `event_id` | integer | ✅ | Positive integer, max 999,999,999 |
+| `quantity` | integer | ❌ | Positive integer, max 100 per request. Default: `1` |
 
 **Internal transaction steps:**
 ```
 1. BEGIN TRANSACTION
-2. SELECT ... FOR UPDATE  ← lock event row
-3. CHECK remaining_tickets > 0
+2. SELECT event WHERE id = ? FOR UPDATE     ← lock event row
+3. CHECK event exists
 4. VERIFY user exists
-5. CHECK no duplicate booking (same user + event)
-6. UPDATE remaining_tickets = remaining_tickets - 1
-7. INSERT booking with UUID unique_code
-8. COMMIT
+5. CHECK if user already has a booking for this event
+   ├─ If YES → additionalTickets = requested quantity
+   └─ If NO  → additionalTickets = requested quantity
+6. CHECK remaining_tickets >= additionalTickets
+7. UPDATE remaining_tickets = remaining_tickets - additionalTickets
+8. If existing booking → UPDATE bookings SET quantity = (old + new)
+   If new booking     → INSERT booking with UUID unique_code
+9. COMMIT (or ROLLBACK on any error)
 ```
 
-**Response `201 Created`:**
+**Response `201 Created` — New Booking:**
 ```json
 {
   "success": true,
-  "message": "Booking confirmed",
+  "message": "Booking confirmed for 2 ticket(s)",
   "data": {
     "booking_id": 42,
     "user_id": 1,
     "event_id": 1,
     "event_title": "Node.js Workshop",
+    "quantity": 2,
     "unique_code": "550e8400-e29b-41d4-a716-446655440000",
     "booking_date": "2026-03-23T10:30:00.000Z"
   }
 }
 ```
 
-> 💡 **Save the `unique_code`** — this is your ticket. Use it for QR code generation or for the attendance endpoint.
+**Response `201 Created` — Quantity Updated (re-booking same event):**
+```json
+{
+  "success": true,
+  "message": "Booking updated: total quantity is now 5 tickets (added 3 more)",
+  "data": {
+    "booking_id": 42,
+    "user_id": 1,
+    "event_id": 1,
+    "event_title": "Node.js Workshop",
+    "quantity": 5,
+    "unique_code": "550e8400-e29b-41d4-a716-446655440000",
+    "booking_date": "2026-03-23T10:30:00.000Z"
+  }
+}
+```
+
+> 💡 **Note:** When a booking is updated, `quantity` in the response reflects the **new total** (existing + newly added). The `unique_code` remains unchanged.
+
+> 💡 **Save the `unique_code`** — this is your ticket. Use it for QR code generation and the attendance check-in endpoint.
 
 ---
 
@@ -548,7 +601,7 @@ Books a ticket inside a **MySQL transaction with a row-level lock** to prevent r
 
 Returns all bookings for a user, joined with full event details. Sorted by `booking_date DESC`.
 
-**Path Parameter:** `id` — the user's ID (positive integer)
+**Path Parameter:** `id` — the user's ID (positive integer, max 999,999,999)
 
 **Response `200 OK`:**
 ```json
@@ -565,12 +618,13 @@ Returns all bookings for a user, joined with full event details. Sorted by `book
       "booking_id": 42,
       "booking_date": "2026-03-23T10:30:00.000Z",
       "unique_code": "550e8400-e29b-41d4-a716-446655440000",
+      "quantity": 2,
       "event_id": 1,
       "event_title": "Node.js Workshop",
       "event_description": "Hands-on Express + MySQL session",
       "event_date": "2026-11-15T18:00:00.000Z",
       "total_capacity": 50,
-      "remaining_tickets": 49
+      "remaining_tickets": 48
     }
   ]
 }
@@ -580,9 +634,9 @@ Returns all bookings for a user, joined with full event details. Sorted by `book
 
 ### 5️⃣ POST `/events/:id/attendance` — Record Check-In
 
-Scans a booking code at the event door and records attendance.
+Scans a booking code at the event door and records attendance. A booking code can only be scanned **once** — duplicate attempts are blocked at both app level (app-level check before insert) and DB level (`UNIQUE` constraint on `booking_code`).
 
-**Path Parameter:** `id` — the event ID
+**Path Parameter:** `id` — the event ID (positive integer)
 
 **Request Body:**
 ```json
@@ -605,7 +659,7 @@ Scans a booking code at the event door and records attendance.
 }
 ```
 
-> `total_bookings` = total tickets sold for this event — useful for live dashboard displays.
+> `total_bookings` = `SUM(quantity)` across all bookings for this event — useful for live dashboard displays.
 
 ---
 
@@ -618,11 +672,16 @@ curl -X POST http://localhost:3000/events \
   -d '{"title":"Node.js Workshop","date":"2026-12-15T18:00:00","total_capacity":50}'
 ```
 
-**Book a ticket:**
+**Book 2 tickets:**
 ```bash
 curl -X POST http://localhost:3000/bookings \
   -H "Content-Type: application/json" \
-  -d '{"user_id":1,"event_id":1}'
+  -d '{"user_id":1,"event_id":1,"quantity":2}'
+```
+
+**Get user booking history:**
+```bash
+curl http://localhost:3000/users/1/bookings
 ```
 
 **Check in at the door:**
@@ -648,7 +707,7 @@ The Swagger UI allows you to:
 - 🔍 Filter endpoints using the search bar
 - 📋 See all possible error responses with example payloads
 
-The documentation is defined in `swagger.yaml` and covers all 5 endpoints with request schemas, success responses, and every possible error response (400, 404, 409, 500).
+The documentation is defined in `swagger.yaml` and covers all 5 endpoints with request schemas, success responses, and every possible error response (`400`, `404`, `409`, `500`).
 
 ---
 
@@ -672,8 +731,8 @@ EventBooking.postman_collection.json
 ```
 Step 1:  POST /events              → Create event — note the event id
 Step 2:  GET  /events              → Verify event appears
-Step 3:  POST /bookings            → Book ticket — copy the unique_code
-Step 4:  GET  /users/1/bookings    → Verify booking appears
+Step 3:  POST /bookings            → Book tickets — copy the unique_code
+Step 4:  GET  /users/1/bookings    → Verify booking + quantity appear
 Step 5:  POST /events/1/attendance → Check in using the unique_code
 ```
 
@@ -713,14 +772,14 @@ Validation errors additionally include an `errors` array listing **every broken 
 
 | Status | When it fires | Example |
 |---|---|---|
-| `400 Bad Request` | Missing/invalid request body fields | `title is required` |
-| `404 Not Found` | Resource does not exist | `Event not found`, `User not found` |
-| `409 Conflict` | Business rule violation | `No tickets remaining`, `Already booked`, `Ticket already scanned` |
+| `400 Bad Request` | Missing/invalid request body fields or invalid path params | `title is required`, `booking_code must be a valid UUID v4` |
+| `404 Not Found` | Resource does not exist | `Event not found`, `User not found`, `Invalid booking code for this event` |
+| `409 Conflict` | Business rule violation | `No tickets remaining`, `Only 2 tickets available`, `This ticket has already been scanned` |
 | `500 Internal Server Error` | Unexpected crash | Stack trace logged server-side only |
 
 ### MySQL Error Codes Handled
 
-The global error handler also catches raw MySQL errors and converts them to clean API responses:
+The global error handler catches raw MySQL errors and converts them to clean API responses:
 
 | MySQL Code | HTTP Status | Meaning |
 |---|---|---|
@@ -760,16 +819,17 @@ Validation runs in **phases** to give the most helpful error messages possible.
 ```js
 // Phase 1: assertAll() — checks ALL fields at once and reports everything missing
 assertAll([
-  [isNonEmpty(title),           "title is required"],
-  [date !== undefined,          "date is required"],        // null also caught
-  [total_capacity !== undefined,"total_capacity is required"],
+  [isNonEmpty(title),            "title is required"],
+  [date !== undefined,           "date is required"],
+  [total_capacity !== undefined, "total_capacity is required"],
 ]);
 
 // Phase 2: assertChain() — short-circuits on first failure
-// Only runs if Phase 1 passes (date is present)
+// Only runs if Phase 1 passes (date is present and non-null)
 assertChain([
-  [isValidDate(date),  "date must be a valid ISO date-time string"],
-  [isFutureDate(date), "date must be in the future"],       // only checks if format is valid
+  [isValidDate(date),              "date must be a valid ISO date-time string"],
+  [isFutureDate(date),             "date must be in the future"],
+  [isReasonableFutureDate(date),   "date cannot be more than 2 years from now"],
 ]);
 ```
 
@@ -783,12 +843,16 @@ This prevents confusing chains of errors from a single root cause.
 
 ### Validators by Route
 
-| Route | Validator | Rules Checked |
+| Route | Validator(s) | Key Rules |
 |---|---|---|
-| `POST /events` | `validateCreateEvent` | title presence + type, date presence + format + future, capacity presence + positive int |
-| `POST /bookings` | `validateCreateBooking` | user_id + event_id presence, then positive integer type |
-| `POST /events/:id/attendance` | `validateEventId` + `validateAttendance` | event id positive int, booking_code non-empty string |
-| `GET /users/:id/bookings` | `validateUserId` | user id positive integer |
+| `POST /events` | `validateCreateEvent` | title: required, non-empty, max 200 chars, no HTML/JS; date: required, valid ISO, future, ≤2 years; capacity: required, positive int, ≤100,000; description: optional, max 2,000 chars, no HTML/JS |
+| `POST /bookings` | `validateCreateBooking` | user_id + event_id: required, positive integers; quantity: optional positive int, max 100 |
+| `POST /events/:id/attendance` | `validateEventId` + `validateAttendance` | event id: positive int ≤999,999,999; booking_code: non-empty, valid UUID v4 format |
+| `GET /users/:id/bookings` | `validateUserId` | user id: positive integer ≤999,999,999 |
+
+### XSS Prevention
+
+Input is rejected at validation time if it contains HTML tags, JavaScript patterns, or HTML entities (e.g., `<script>`, `&lt;`). Additionally, all string fields (`title`, `description`, `name`) are passed through `escape-html` before being included in any response.
 
 ---
 
@@ -801,7 +865,7 @@ This prevents confusing chains of errors from a single root cause.
 **The solution:** `SELECT ... FOR UPDATE` inside a transaction:
 
 ```js
-const conn = await pool.getConnection();   // dedicated connection
+const conn = await pool.getConnection();   // dedicated connection from pool
 await conn.beginTransaction();
 
 // This locks the event row — all other transactions
@@ -811,9 +875,15 @@ const [[event]] = await conn.query(
   [event_id]
 );
 
-// Now we safely check and decrement
-if (event.remaining_tickets <= 0) throw AppError.conflict("Sold out");
-await conn.query(`UPDATE events SET remaining_tickets = remaining_tickets - 1 WHERE id = ?`, [event_id]);
+if (event.remaining_tickets < requestedTickets) {
+  throw AppError.conflict(`Only ${event.remaining_tickets} tickets available`);
+}
+
+// Atomically decrement by the number of tickets actually being added
+await conn.query(
+  `UPDATE events SET remaining_tickets = remaining_tickets - ? WHERE id = ?`,
+  [additionalTickets, event_id]
+);
 
 await conn.commit();
 ```
@@ -822,7 +892,30 @@ The `finally { conn.release() }` block guarantees the connection always returns 
 
 ---
 
-### 2. 🏗️ MVC Separation of Concerns
+### 2. 🔁 Booking Quantity Update vs. Duplicate Rejection
+
+Rather than returning a `409 Conflict` when a user tries to book the same event twice, the controller detects the existing booking and **increments its quantity** instead:
+
+```js
+const [[existingBooking]] = await conn.query(
+  `SELECT id, quantity FROM bookings WHERE user_id = ? AND event_id = ?`,
+  [user_id, event_id]
+);
+
+if (existingBooking) {
+  // Only check/decrement the additional tickets requested
+  const additionalTickets = requestedTickets;
+  // UPDATE bookings SET quantity = (existingQty + requestedQty) WHERE id = ?
+} else {
+  // INSERT new booking with fresh UUID
+}
+```
+
+The `UNIQUE(user_id, event_id)` constraint in the schema still acts as a safety net at the database level.
+
+---
+
+### 3. 🏗️ MVC Separation of Concerns
 
 Each layer has exactly one responsibility:
 
@@ -838,9 +931,25 @@ Routes are deliberately thin — the entire `routes/bookings.js` is:
 router.post("/", asyncHandler(createBooking));
 ```
 
+All routes are aggregated in `routes/index.js`, which is the only route file imported by `app.js`. Adding a new resource requires only one new line in `index.js`.
+
 ---
 
-### 3. 🎯 Typed Error System with `AppError`
+### 4. ✂️ `app.js` / `server.js` Separation
+
+`server.js` does exactly one thing — bind a port:
+```js
+const app = require("./app");
+app.listen(PORT, () => { ... });
+```
+
+All Express configuration (body parser, Swagger UI, route mounting, error handler) lives in `app.js`. This separation means:
+- Tests can `require("./app")` without binding a port
+- Switching from HTTP to HTTPS only touches `server.js`
+
+---
+
+### 5. 🎯 Typed Error System with `AppError`
 
 Instead of scattered `res.status(400).json({...})` calls, every intentional error is thrown as a typed `AppError`:
 
@@ -854,18 +963,20 @@ The `isAppError: true` flag lets the global `errorHandler` distinguish intention
 
 ---
 
-### 4. 🆔 UUID as Booking Code
+### 6. 🆔 UUID as Booking Code
 
-`uuid` v4 generates a cryptographically random 128-bit identifier (e.g. `550e8400-e29b-41d4-a716-446655440000`). This serves as the booking ticket because:
+`uuid` v4 generates a cryptographically random 128-bit identifier (e.g. `550e8400-e29b-41d4-a716-446655440000`). This is used as the booking ticket because:
 
 - ✅ Globally unique — collision probability is negligible
 - ✅ Unpredictable — cannot be guessed or enumerated by a bad actor
 - ✅ QR-code ready — any QR library can encode a UUID string
-- ✅ Validated at both app level (string match) and DB level (UNIQUE constraint)
+- ✅ Validated at app level (UUID v4 regex in `validateAttendance`) and DB level (`UNIQUE` constraint)
+
+When a booking's quantity is updated, the original `unique_code` is preserved so existing QR codes remain valid.
 
 ---
 
-### 5. 🗃️ Connection Pool vs Single Connection
+### 7. 🗃️ Connection Pool vs Dedicated Connection
 
 | Scenario | Connection Type | Why |
 |---|---|---|
@@ -874,19 +985,17 @@ The `isAppError: true` flag lets the global `errorHandler` distinguish intention
 
 ---
 
----
-
 ## 🐳 Docker Deployment
 
 Run the entire stack — API + MySQL — with a **single command**. No local MySQL installation needed.
 
-### Files Added
+### Files Included
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | Builds the Node.js API image using `node:22-alpine` |
-| `docker-compose.yml` | Orchestrates API + MySQL containers together |
-| `.dockerignore` | Excludes `node_modules`, `.env`, logs from the image |
+| `Dockerfile` | Builds the Node.js API image using `node:22-alpine`; installs only production deps (`--omit=dev`) |
+| `docker-compose.yml` | Orchestrates API + MySQL 8 containers; waits for DB health before starting API |
+| `.dockerignore` | Excludes `node_modules`, `.env`, logs, `.git`, and editor folders from the image |
 
 ---
 
@@ -930,7 +1039,7 @@ Docker will:
 1. 🔨 Build the Node.js API image
 2. 🗄️ Pull and start MySQL 8.0
 3. 📋 Auto-import `models/schema.sql` into the database
-4. ⏳ Wait for MySQL to be healthy before starting the API
+4. ⏳ Wait for MySQL to be healthy before starting the API (`condition: service_healthy`)
 5. 🚀 Start the API server
 
 **Expected output:**
